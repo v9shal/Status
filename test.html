@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><title>StatusPage Test</title></head>
+<body>
+<h1>Incident Updates</h1>
+<div id="updates"></div>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+    const socket = io('http://localhost:3000')
+    
+    socket.on('connect', () => {
+        document.getElementById('updates').innerHTML += '<p>Connected!</p>'
+    })
+    
+    socket.on('incident-update', (data) => {
+        document.getElementById('updates').innerHTML += 
+            `<p>${data.status}: ${data.message}</p>`
+    })
+</script>
+</body>
+</html>
