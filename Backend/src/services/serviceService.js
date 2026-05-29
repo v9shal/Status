@@ -1,4 +1,5 @@
 const { sql } = require('../db');
+const cache = require('./cacheService');
 
 async function getAllServices() {
   try {
@@ -17,6 +18,7 @@ async function createService(name, description) {
       VALUES (${name}, ${description})
       RETURNING *
     `;
+    await cache.invalidateStatus();
     return result[0];
   } catch (err) {
     console.error("Error creating service:", err);
@@ -45,6 +47,7 @@ async function updateService(id, name, description, status) {
       WHERE id = ${id}
       RETURNING *
     `;
+    await cache.invalidateStatus();
     return result[0];
   } catch (err) {
     console.error("Error updating service:", err);

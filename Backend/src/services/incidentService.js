@@ -21,10 +21,18 @@
     // Enqueue final notification
     // Return updated incident
 
-const { Queue } = require('../queue/Queue')
+const { Queue } = require('../Queue/queue')
 const { redis } = require('../redis')
     const { sql } = require('../db');
-    const notificationQueue = new Queue('notifications', redis)
+    const cache = require('./cacheService');
+
+    let notificationQueue;
+    function getNotificationQueue() {
+        if (!notificationQueue) {
+            notificationQueue = new Queue('notifications', redis);
+        }
+        return notificationQueue;
+    }
     async function getAllIncident(){
         try{
             const result=await sql`SELECT * FROM incidents`;
@@ -57,7 +65,7 @@ const { redis } = require('../redis')
             `
             // Enqueue notification jobs for each subscriber (not implemented here) 
             console.log("Subscribers to notify:", fetchSubscribersResult);
-
+        await cache.invalidateIncident(result[0].id);
             await redis.publish('incident-updates',JSON.stringify({
                 incidentId: result[0].id,
                 message: description,
@@ -65,7 +73,7 @@ const { redis } = require('../redis')
                 timestamp: Date.now()
             }))
            for (const subscriber of fetchSubscribersResult) {
-    await notificationQueue.enqueue({
+    await getNotificationQueue().enqueue({
         email: subscriber.email,
         subscriberId: subscriber.id,
         incidentId: result[0].id,
@@ -108,6 +116,7 @@ const { redis } = require('../redis')
             `
             // Enqueue notification jobs for each subscriber (not implemented here) 
             console.log("Subscribers to notify:", fetchSubscribersResult);
+            await cache.invalidateIncident(id);
              await redis.publish('incident-updates',JSON.stringify({
                 incidentId: IncidentUpdatedResult[0].id,
                 message: description,
@@ -125,7 +134,12 @@ const { redis } = require('../redis')
     }
     async function getIncidentById(id){
         try{
+            const cached = await cache.get(cache.keys.incident(id));
+            if (cached) return cached;
             const result=await sql`SELECT * FROM incidents WHERE id=${id}`;
+            if (result[0]) {
+                await cache.set(cache.keys.incident(id), result[0], 3600);
+            }
             return result[0];
         }
         catch(err){
@@ -164,8 +178,9 @@ const { redis } = require('../redis')
                 status: result[0].status,
                 timestamp: Date.now()
             }))
+            await cache.invalidateIncident(id);
          for (const subscriber of fetchSubscribersResult) {
-    await notificationQueue.enqueue({
+    await getNotificationQueue().enqueue({
         email: subscriber.email,
         subscriberId: subscriber.id,
         incidentId: result[0].id,
