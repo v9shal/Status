@@ -2,7 +2,6 @@ const express = require('express')
 const { createServer } = require('node:http');
 const { initGateway } = require('./websocket/gateway')
 const { redis, redisSubscriber } = require('./redis')
-const { createTable } = require('./migrate')
 const { Queue } = require('./Queue/queue');
 const { Worker } = require('./Queue/worker');
 const { notify } = require('./worker/notificationWorker');
@@ -25,7 +24,6 @@ const server = createServer(app);
 initGateway(server, redisSubscriber)
 
 server.listen(3000, async () => {
-    await createTable();
 
     const queue = new Queue('notifications', redis);
     await queue.register();
