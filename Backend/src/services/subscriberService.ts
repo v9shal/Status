@@ -1,0 +1,91 @@
+import { sql } from '../db';
+import * as crypto from 'crypto';
+import transporter from './transporter';
+
+export async function createSubscriber(email: string, service_id: number | string) {
+    try {
+        const existingSubscriber = await sql`SELECT * FROM subscribers WHERE email = ${email}`;
+        if (existingSubscriber.length > 0) {
+            const subscriber = existingSubscriber[0];
+            if (!subscriber.confirmed) {
+                throw new Error('Email not verified. Please confirm your email before subscribing.');
+            }
+            const existingSubscription = await sql`
+                SELECT * FROM subscriptions
+                WHERE subscriber_id = ${subscriber.id} AND service_id = ${service_id}
+            `;
+            if (existingSubscription.length > 0) {
+                throw new Error('Already subscribed to this service.');
+            }
+            await sql`
+                INSERT INTO subscriptions (subscriber_id, service_id)
+                VALUES (${subscriber.id}, ${service_id})
+            `;
+            return { message: 'Subscription created successfully.' };
+        }
+
+        const token = crypto.randomBytes(32).toString('hex');
+        const newSubscriber = await sql`
+            INSERT INTO subscribers (email, token)
+            VALUES (${email}, ${token})
+            RETURNING *
+        `;
+        await transporter.sendMail({
+            from: process.env.SMTP_FROM || '"Status Page" <noreply@example.com>',
+            to: email,
+            subject: 'Confirm your subscription',
+            text: `Please confirm your subscription by visiting: ${process.env.BASE_URL || 'http://localhost:3000'}/api/subscriber/confirm?token=${token}`,
+            html: `<p>Please confirm your subscription by clicking <a href="${process.env.BASE_URL || 'http://localhost:3000'}/api/subscriber/confirm?token=${token}">here</a>.</p>`,
+        });
+        return {
+            message: 'Subscriber created. Please confirm your email.',
+            subscriber: newSubscriber[0],
+        };
+    } catch (err) {
+        console.error('Error creating subscriber:', err);
+        throw err;
+    }
+}
+
+export async function deleteSubscriber(email: string, service_id: number | string) {
+    try {
+        const existingSubscriber = await sql`SELECT * FROM subscribers WHERE email = ${email}`;
+        if (existingSubscriber.length === 0) {
+            throw new Error('Subscriber not found.');
+        }
+        const subscriber = existingSubscriber[0];
+        const existingSubscription = await sql`
+            SELECT * FROM subscriptions
+            WHERE subscriber_id = ${subscriber.id} AND service_id = ${service_id}
+        `;
+        if (existingSubscription.length === 0) {
+            throw new Error('Subscription not found for this service.');
+        }
+        await sql`
+            DELETE FROM subscriptions
+            WHERE subscriber_id = ${subscriber.id} AND service_id = ${service_id}
+        `;
+        return { message: 'Unsubscribed successfully.' };
+    } catch (err) {
+        console.error('Error deleting subscriber:', err);
+        throw err;
+    }
+}
+
+export async function confirmSubscriber(token: string) {
+    try {
+        const result = await sql`
+            UPDATE subscribers
+            SET confirmed = true, token = null
+            WHERE token = ${token} AND confirmed = false
+            RETURNING *
+        `;
+        if (result.length === 0) {
+            throw new Error('Invalid or already used confirmation token.');
+        }
+        return { message: 'Email confirmed successfully.', subscriber: result[0] };
+    } catch (err) {
+        console.error('Error confirming subscriber:', err);
+        throw err;
+    }
+}
