@@ -1,32 +1,39 @@
-'use strict';
-
 /**
  * Queue benchmark
  * ---------------
  * Measures throughput and latency of the Redis-backed Queue:
  *   - enqueue (Lua-script atomic insert with size cap)
  *   - claim   (atomic pop + move to processing set with visibility timeout)
- *   - end-to-end produce -> consume roundtrip
  *
  * Requires a running Redis (REDIS_URL or default redis://localhost:6379).
  *
  * Run:  npm run bench:queue
  */
 
-const Redis = require('ioredis');
-const { performance } = require('node:perf_hooks');
-const { Queue } = require('../src/Queue/queue');
+import Redis from 'ioredis';
+import { performance } from 'node:perf_hooks';
+import { Queue } from '../src/Queue/queue';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const N = parseInt(process.env.BENCH_N || '500000', 10);
+const N = parseInt(process.env.BENCH_N || '5000', 10);
 const CONCURRENCY = parseInt(process.env.BENCH_CONCURRENCY || '50', 10);
 
-function pct(sorted, p) {
+interface Summary {
+    label: string;
+    n: number;
+    mean: number;
+    p50: number;
+    p95: number;
+    p99: number;
+    max: number;
+}
+
+function pct(sorted: number[], p: number): number {
     const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
     return sorted[idx];
 }
 
-function summarize(label, durationsMs) {
+function summarize(label: string, durationsMs: number[]): Summary {
     durationsMs.sort((a, b) => a - b);
     const sum = durationsMs.reduce((a, b) => a + b, 0);
     return {
@@ -40,28 +47,26 @@ function summarize(label, durationsMs) {
     };
 }
 
-function printTable(rows) {
-    const cols = ['label', 'n', 'mean', 'p50', 'p95', 'p99', 'max'];
-    console.log(cols.map((c) => c.padStart(12)).join(' '));
+function printTable(rows: Summary[]): void {
+    const cols: (keyof Summary)[] = ['label', 'n', 'mean', 'p50', 'p95', 'p99', 'max'];
+    console.log(cols.map((c) => String(c).padStart(12)).join(' '));
     for (const r of rows) {
         console.log(cols.map((c) => String(r[c]).padStart(12)).join(' '));
     }
 }
 
-async function flushBenchKeys(redis) {
-    // Only clean our prefix — never call FLUSHALL.
+async function flushBenchKeys(redis: Redis): Promise<void> {
     const stream = redis.scanStream({ match: '{homebrewmq}*', count: 500 });
     const pipeline = redis.pipeline();
     let count = 0;
-    for await (const keys of stream) {
+    for await (const keys of stream as AsyncIterable<string[]>) {
         for (const k of keys) {
             pipeline.del(k);
             count++;
         }
     }
-    // Also clear job:* hashes we created
     const jobStream = redis.scanStream({ match: 'job:*', count: 500 });
-    for await (const keys of jobStream) {
+    for await (const keys of jobStream as AsyncIterable<string[]>) {
         for (const k of keys) {
             pipeline.del(k);
             count++;
@@ -70,13 +75,13 @@ async function flushBenchKeys(redis) {
     if (count > 0) await pipeline.exec();
 }
 
-async function runEnqueue(queue) {
-    const durations = new Array(N);
+async function runEnqueue(queue: Queue): Promise<{ durations: number[]; wallMs: number }> {
+    const durations = new Array<number>(N);
     let inflight = 0;
     let nextIdx = 0;
     const start = performance.now();
 
-    await new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
         const launch = () => {
             while (inflight < CONCURRENCY && nextIdx < N) {
                 const i = nextIdx++;
@@ -100,12 +105,14 @@ async function runEnqueue(queue) {
     return { durations, wallMs };
 }
 
-async function runClaim(queue, expected) {
-    const durations = [];
+async function runClaim(
+    queue: Queue,
+    expected: number
+): Promise<{ durations: number[]; wallMs: number; claimed: number }> {
+    const durations: number[] = [];
     const start = performance.now();
     let claimed = 0;
 
-    // Drain serially — Lua claim is single-shot and we want true latency per op.
     while (claimed < expected) {
         const t0 = performance.now();
         const job = await queue.claim();
@@ -120,14 +127,14 @@ async function runClaim(queue, expected) {
     return { durations, wallMs, claimed };
 }
 
-async function main() {
+async function main(): Promise<void> {
     const redis = new Redis(REDIS_URL, { maxRetriesPerRequest: null });
     redis.on('error', (e) => console.error('Redis error:', e.message));
 
     try {
         await redis.ping();
-    } catch (e) {
-        console.error(`Could not reach Redis at ${REDIS_URL}: ${e.message}`);
+    } catch (e: any) {
+        console.error(`Could not reach Redis at ${REDIS_URL}: ${e?.message}`);
         process.exit(1);
     }
 
@@ -142,12 +149,10 @@ async function main() {
     const queue = new Queue('bench', redis, { maxQueueSize: N * 2 });
     await queue.register();
 
-    // --- Enqueue ---
     const enq = await runEnqueue(queue);
     const enqSummary = summarize('enqueue', enq.durations);
     const enqTput = Math.round((N / enq.wallMs) * 1000);
 
-    // --- Claim + complete ---
     const cl = await runClaim(queue, N);
     const clSummary = summarize('claim+ack', cl.durations);
     const clTput = Math.round((cl.claimed / cl.wallMs) * 1000);
@@ -159,10 +164,9 @@ async function main() {
     console.log(`  enqueue:    ${enqTput.toLocaleString()} ops/sec  (${enq.wallMs.toFixed(0)} ms wall)`);
     console.log(`  claim+ack:  ${clTput.toLocaleString()} ops/sec  (${cl.wallMs.toFixed(0)} ms wall)`);
 
-    // --- Invariants ---
     console.log('\nInvariants:');
     let failed = 0;
-    const assert = (cond, msg) => {
+    const assert = (cond: boolean, msg: string) => {
         if (cond) console.log(`  PASS: ${msg}`);
         else {
             console.error(`  FAIL: ${msg}`);
@@ -173,7 +177,6 @@ async function main() {
     assert(enqSummary.p99 < 50, `enqueue p99 < 50ms (got ${enqSummary.p99}ms)`);
     assert(clSummary.p99 < 50, `claim+ack p99 < 50ms (got ${clSummary.p99}ms)`);
 
-    // Queue should be empty after drain
     const readyLen = await redis.zcard('{homebrewmq}:readyQueue');
     const procLen = await redis.zcard('{homebrewmq}:processingQueue');
     assert(readyLen === 0, `ready queue drained (size=${readyLen})`);

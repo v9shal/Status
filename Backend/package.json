@@ -2,15 +2,24 @@
   "name": "statuspage-backend",
   "version": "1.0.0",
   "description": "Real-time status page API: Express + Postgres + Redis queue/pub-sub + Socket.IO + SMTP worker pool",
-  "main": "src/index.js",
+  "main": "dist/src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "migrate": "node src/migrate.js",
-    "bench:backoff": "node bench/backoff.bench.js",
-    "bench:queue": "node bench/queue.bench.js",
+    "build": "tsc && cp -r src/lua dist/src/lua",
+    "start": "node dist/src/index.js",
+    "dev": "tsx src/index.ts",
+    "migrate": "tsx src/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "bench:backoff": "tsx bench/backoff.bench.ts",
+    "bench:queue": "tsx bench/queue.bench.ts",
     "bench": "npm run bench:backoff && npm run bench:queue"
   },
-  "keywords": ["status-page", "incidents", "redis", "websocket", "queue"],
+  "keywords": [
+    "status-page",
+    "incidents",
+    "redis",
+    "websocket",
+    "queue"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -22,5 +31,12 @@
     "nodemailer": "^8.0.9",
     "socket.io": "^4.8.3",
     "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.19",
+    "@types/nodemailer": "^6.4.23",
+    "tsx": "^4.22.3",
+    "typescript": "^5.9.3"
   }
 }

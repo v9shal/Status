@@ -1,28 +1,37 @@
-'use strict';
-
 /**
  * Backoff benchmark
  * -----------------
- * Measures throughput of utils/backoff.js and validates statistical
+ * Measures throughput of utils/backoff and validates statistical
  * properties of the exponential-backoff-with-jitter algorithm.
  *
  * Run:  npm run bench:backoff
  */
 
-const { performance } = require('node:perf_hooks');
-const { backoff } = require('../src/utils/backoff');
+import { performance } from 'node:perf_hooks';
+import { backoff } from '../src/utils/backoff';
 
 const BASE_MS = 1000;
 const CAP_MS = 30_000;
 const JITTER_MAX = 1000;
 
-function pct(sorted, p) {
+interface DistRow {
+    attempts: number;
+    samples: number;
+    min: number;
+    p50: number;
+    p95: number;
+    p99: number;
+    max: number;
+    mean: number;
+    expectedRange: [number, number];
+}
+
+function pct(sorted: number[], p: number): number {
     const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
     return sorted[idx];
 }
 
-function throughput(iterations) {
-    // Warmup
+function throughput(iterations: number): { elapsed: number; opsPerSec: number } {
     for (let i = 0; i < 100_000; i++) backoff(i % 6);
 
     const start = performance.now();
@@ -30,15 +39,14 @@ function throughput(iterations) {
     for (let i = 0; i < iterations; i++) sink ^= backoff(i % 6);
     const elapsed = performance.now() - start;
 
-    // Prevent dead-code elimination
     if (sink === 0xdeadbeef) console.log('');
 
     const opsPerSec = (iterations / elapsed) * 1000;
     return { elapsed, opsPerSec };
 }
 
-function distribution(attempts, samples) {
-    const values = new Array(samples);
+function distribution(attempts: number, samples: number): DistRow {
+    const values = new Array<number>(samples);
     for (let i = 0; i < samples; i++) values[i] = backoff(attempts);
     values.sort((a, b) => a - b);
 
@@ -60,7 +68,7 @@ function distribution(attempts, samples) {
     };
 }
 
-function assert(cond, msg) {
+function assert(cond: boolean, msg: string): void {
     if (!cond) {
         console.error(`  FAIL: ${msg}`);
         process.exitCode = 1;
@@ -69,23 +77,21 @@ function assert(cond, msg) {
     console.log(`  PASS: ${msg}`);
 }
 
-function main() {
+function main(): void {
     console.log('Backoff benchmark');
     console.log('-----------------\n');
 
-    // 1. Throughput
     const iterations = 5_000_000;
     const { elapsed, opsPerSec } = throughput(iterations);
     console.log(`Throughput: ${iterations.toLocaleString()} ops in ${elapsed.toFixed(1)} ms`);
     console.log(`            ${Math.round(opsPerSec).toLocaleString()} ops/sec`);
     console.log(`            ${((elapsed * 1e6) / iterations).toFixed(0)} ns/op\n`);
 
-    // 2. Distribution across retry attempts
     console.log('Distribution (10,000 samples per attempt):\n');
     const header = ['attempts', 'min', 'p50', 'p95', 'p99', 'max', 'mean', 'expected'];
     console.log(header.map((h) => h.padStart(10)).join(' '));
 
-    const rows = [];
+    const rows: DistRow[] = [];
     for (let a = 0; a <= 6; a++) {
         const d = distribution(a, 10_000);
         rows.push(d);
@@ -105,7 +111,6 @@ function main() {
         );
     }
 
-    // 3. Invariants
     console.log('\nInvariants:');
     assert(opsPerSec > 1_000_000, 'throughput > 1M ops/sec');
 
@@ -117,13 +122,11 @@ function main() {
         );
     }
 
-    // Cap should kick in: attempts >= 5 all share the same expected ceiling
     assert(
         rows[5].expectedRange[0] === CAP_MS && rows[6].expectedRange[0] === CAP_MS,
         `delay capped at ${CAP_MS}ms for high attempt counts`
     );
 
-    // Jitter spreads values: p95 - p50 should be meaningfully > 0
     for (const r of rows) {
         assert(
             r.p95 - r.p50 > 100,
