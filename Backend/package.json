@@ -1,18 +1,21 @@
 {
-  "name": "backend",
+  "name": "statuspage-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Real-time status page API: Express + Postgres + Redis queue/pub-sub + Socket.IO + SMTP worker pool",
+  "main": "src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/index.js",
+    "migrate": "node src/migrate.js",
+    "bench:backoff": "node bench/backoff.bench.js",
+    "bench:queue": "node bench/queue.bench.js",
+    "bench": "npm run bench:backoff && npm run bench:queue"
   },
-  "keywords": [],
+  "keywords": ["status-page", "incidents", "redis", "websocket", "queue"],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
-    "crypto": "^1.0.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "ioredis": "^5.11.0",
