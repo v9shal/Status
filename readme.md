@@ -1,8 +1,21 @@
 # StatusPage
 
+[![CI](https://github.com/v9shal/Status/actions/workflows/ci.yml/badge.svg?branch=feat%2Fgateway)](https://github.com/v9shal/Status/actions/workflows/ci.yml)
+
 A real-time status page and incident management system. Monitor services, manage incidents, notify subscribers via email, and broadcast live updates over WebSockets.
 
 ## Architecture
+
+```mermaid
+flowchart LR
+       Admin[Admin and public React clients] --> API[Express API]
+       API --> DB[(PostgreSQL)]
+       API --> Redis[(Redis cache, queue, Pub/Sub)]
+       Redis --> WS[Socket.IO gateway]
+       WS --> Clients[Connected clients]
+       Redis --> Workers[Notification workers]
+       Workers --> SMTP[SMTP provider]
+```
 
 ```
 Admin Panel (React)          Public Status Page (React)
@@ -242,3 +255,9 @@ Frontend/
 │   └── types/
 │       └── index.ts
 ```
+
+## Limitations and results
+
+- The backend requires PostgreSQL, Redis, and SMTP configuration; the frontend alone is not a complete deployment.
+- The repository includes benchmark scripts, but no benchmark measurements are published here.
+- The backend currently has no automated test script. CI type-checks and builds both applications.
